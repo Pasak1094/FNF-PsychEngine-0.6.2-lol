@@ -1,191 +1,400 @@
 package;
 
-#if android
-import android.Hardware;
-import android.Permissions;
-import android.os.Build.VERSION;
-import android.os.Environment;
-#end
-import flash.system.System;
 import flixel.FlxG;
-import flixel.util.FlxStringUtil;
-import haxe.CallStack.StackItem;
-import haxe.CallStack;
-import haxe.io.Path;
-import lime.app.Application;
-import openfl.events.UncaughtErrorEvent;
+import flixel.graphics.frames.FlxAtlasFrames;
+import openfl.utils.AssetType;
 import openfl.utils.Assets as OpenFlAssets;
-import openfl.Lib;
-import sys.FileSystem;
+import lime.utils.Assets;
+import flixel.FlxSprite;
+#if MODS_ALLOWED
 import sys.io.File;
+import sys.FileSystem;
+import flixel.graphics.FlxGraphic;
+import openfl.display.BitmapData;
+#end
 
-/**
- * ...
- * @author: Saw (M.A. Jigsaw)
- */
-class SUtil
+import flash.media.Sound;
+
+using StringTools;
+
+class Paths
 {
-	/**
-	 * A simple check function
-	 */
-	public static function check()
-	{
-		#if android
-		if (!Permissions.getGrantedPermissions().contains(PermissionsList.WRITE_EXTERNAL_STORAGE)
-			&& !Permissions.getGrantedPermissions().contains(PermissionsList.READ_EXTERNAL_STORAGE))
-		{
-			if (VERSION.SDK_INT > 23 || VERSION.SDK_INT == 23)
-			{
-				Permissions.requestPermissions([PermissionsList.WRITE_EXTERNAL_STORAGE, PermissionsList.READ_EXTERNAL_STORAGE]);
+	inline public static var SOUND_EXT = #if web "mp3" #else "ogg" #end;
+	
+	inline public static var VIDEO_EXT = "";
 
-				/**
-				 * Basically for now i can't force the app to stop while its requesting a android permission, so this makes the app to stop while its requesting the specific permission
-				 */
-				Application.current.window.alert('If you accepted the permissions you are all good!' + "\nIf you didn't then expect a crash"
-					+ 'Press Ok to see what happens',
-					'Permissions?');
-			}
-			else
-			{
-				Application.current.window.alert('Please grant the game storage permissions in app settings' + '\nPress Ok io close the app', 'Permissions?');
-				System.exit(1);
+	#if MODS_ALLOWED
+	#if (haxe >= "4.0.0")
+	public static var customImagesLoaded:Map<String, Bool> = new Map();
+	public static var customSoundsLoaded:Map<String, Sound> = new Map();
+	#else
+	public static var customImagesLoaded:Map<String, Bool> = new Map<String, Bool>();
+	public static var customSoundsLoaded:Map<String, Sound> = new Map<String, Sound>();
+	#end
+	
+	public static var ignoreModFolders:Array<String> = [
+		'characters',
+		'custom_events',
+		'custom_notetypes',
+		'data',
+		'songs',
+		'music',
+		'sounds',
+		'videos',
+		'images',
+		'stages',
+		'weeks',
+		'fonts',
+		'scripts'
+	];
+	#end
+
+	public static function destroyLoadedImages(ignoreCheck:Bool = false) {
+		#if MODS_ALLOWED
+		if(!ignoreCheck && ClientPrefs.imagesPersist) return; //If there's 20+ images loaded, do a cleanup just for preventing a crash
+
+		for (key in customImagesLoaded.keys()) {
+			var graphic:FlxGraphic = FlxG.bitmap.get(key);
+			if(graphic != null) {
+				graphic.bitmap.dispose();
+				graphic.destroy();
+				FlxG.bitmap.removeByKey(key);
 			}
 		}
-
-		if (Permissions.getGrantedPermissions().contains(PermissionsList.WRITE_EXTERNAL_STORAGE)
-			&& Permissions.getGrantedPermissions().contains(PermissionsList.READ_EXTERNAL_STORAGE))
-		{
-			if (!FileSystem.exists(SUtil.getPath()))
-				FileSystem.createDirectory(SUtil.getPath());
-
-			if (!FileSystem.exists(SUtil.getPath() + 'assets') && !FileSystem.exists(SUtil.getPath() + 'mods'))
-			{
-				Application.current.window.alert("Whoops, seems like you didn't extract the files from the .APK!\nPlease watch the tutorial by pressing OK.",
-					'Error!');
-				FlxG.openURL('https://youtu.be/zjvkTmdWvfU');
-				System.exit(1);
-			}
-			else if ((FileSystem.exists(SUtil.getPath() + 'assets') && !FileSystem.isDirectory(SUtil.getPath() + 'assets'))
-				&& (FileSystem.exists(SUtil.getPath() + 'mods') && !FileSystem.isDirectory(SUtil.getPath() + 'mods')))
-			{
-				Application.current.window.alert("Why did you create two files called assets and mods instead of copying the folders from the apk?, expect a crash.",
-					'Error!');
-				System.exit(1);
-			}
-			else
-			{
-				if (!FileSystem.exists(SUtil.getPath() + 'assets'))
-				{
-					Application.current.window.alert("Whoops, seems like you didn't extract the assets/assets folder from the .APK!\nPlease watch the tutorial by pressing OK.",
-						'Error!');
-					FlxG.openURL('https://youtu.be/zjvkTmdWvfU');
-					System.exit(1);
-				}
-				else if (FileSystem.exists(SUtil.getPath() + 'assets') && !FileSystem.isDirectory(SUtil.getPath() + 'assets'))
-				{
-					Application.current.window.alert("Why did you create a file called assets instead of copying the assets directory from the apk?, expect a crash.",
-						'Error!');
-					System.exit(1);
-				}
-
-				if (!FileSystem.exists(SUtil.getPath() + 'mods'))
-				{
-					Application.current.window.alert("Whoops, seems like you didn't extract the assets/mods folder from the .APK!\nPlease watch the tutorial by pressing OK.",
-						'Error!');
-					FlxG.openURL('https://youtu.be/zjvkTmdWvfU');
-					System.exit(1);
-				}
-				else if (FileSystem.exists(SUtil.getPath() + 'mods') && !FileSystem.isDirectory(SUtil.getPath() + 'mods'))
-				{
-					Application.current.window.alert("Why did you create a file called mods instead of copying the mods directory from the apk?, expect a crash.",
-						'Error!');
-					System.exit(1);
-				}
-			}
-		}
+		Paths.customImagesLoaded.clear();
 		#end
 	}
 
-	/**
-	 * This returns the external storage path that the game will use
-	 */
-	public static function getPath():String
+	static public var currentModDirectory:String = '';
+	static var currentLevel:String;
+	static public function setCurrentLevel(name:String)
 	{
-		#if android
-		return Environment.getExternalStorageDirectory() + '/' + '.' + Application.current.meta.get('file') + '/';
+		currentLevel = name.toLowerCase();
+	}
+
+	public static function getPath(file:String, type:AssetType, ?library:Null<String> = null)
+	{
+		if (library != null)
+			return getLibraryPath(file, library);
+
+		if (currentLevel != null)
+		{
+			var levelPath:String = '';
+			if(currentLevel != 'shared') {
+				levelPath = getLibraryPathForce(file, currentLevel);
+				if (OpenFlAssets.exists(levelPath, type))
+					return levelPath;
+			}
+
+			levelPath = getLibraryPathForce(file, "shared");
+			if (OpenFlAssets.exists(levelPath, type))
+				return levelPath;
+		}
+
+		return getPreloadPath(file);
+	}
+
+	static public function getLibraryPath(file:String, library = "preload")
+	{
+		return if (library == "preload" || library == "default") getPreloadPath(file); else getLibraryPathForce(file, library);
+	}
+
+	inline static function getLibraryPathForce(file:String, library:String)
+	{
+		return '$library:assets/$library/$file';
+	}
+
+	inline public static function getPreloadPath(file:String = '')
+	{
+		return 'assets/$file';
+	}
+
+	inline static public function file(file:String, type:AssetType = TEXT, ?library:String)
+	{
+		return getPath(file, type, library);
+	}
+
+	inline static public function txt(key:String, ?library:String)
+	{
+		return getPath('data/$key.txt', TEXT, library);
+	}
+
+	inline static public function xml(key:String, ?library:String)
+	{
+		return getPath('data/$key.xml', TEXT, library);
+	}
+
+	inline static public function json(key:String, ?library:String)
+	{
+		return getPath('data/$key.json', TEXT, library);
+	}
+
+	inline static public function lua(key:String, ?library:String)
+	{
+		return Main.path + getPath('$key.lua', TEXT, library);
+	}
+
+	inline static public function luaAsset(key:String, ?library:String)
+	{
+		return getPath('$key.lua', TEXT, library);
+	}
+
+	static public function video(key:String)
+	{
+		#if MODS_ALLOWED
+		var file:String = modsVideo(key);
+		if(FileSystem.exists(file)) {
+			return file;
+		}
+		#end
+		return 'assets/videos/$key';
+	}
+
+	static public function sound(key:String, ?library:String):Dynamic
+	{
+		#if MODS_ALLOWED
+		var file:String = modsSounds(key);
+		if(FileSystem.exists(file)) {
+			if(!customSoundsLoaded.exists(file)) {
+				customSoundsLoaded.set(file, Sound.fromFile(file));
+			}
+			return customSoundsLoaded.get(file);
+		}
+		#end
+		return getPath('sounds/$key.$SOUND_EXT', SOUND, library);
+	}
+	
+	inline static public function soundRandom(key:String, min:Int, max:Int, ?library:String)
+	{
+		return sound(key + FlxG.random.int(min, max), library);
+	}
+
+	inline static public function music(key:String, ?library:String):Dynamic
+	{
+		#if MODS_ALLOWED
+		var file:String = modsMusic(key);
+		if(FileSystem.exists(file)) {
+			if(!customSoundsLoaded.exists(file)) {
+				customSoundsLoaded.set(file, Sound.fromFile(file));
+			}
+			return customSoundsLoaded.get(file);
+		}
+		#end
+		return getPath('music/$key.$SOUND_EXT', MUSIC, library);
+	}
+
+	inline static public function voices(song:String):Any
+	{
+		#if MODS_ALLOWED
+		var file:Sound = returnSongFile(modsSongs(song.toLowerCase().replace(' ', '-') + '/Voices'));
+		if(file != null) {
+			return file;
+		}
+		#end
+		return 'songs:assets/songs/${song.toLowerCase().replace(' ', '-')}/Voices.$SOUND_EXT';
+	}
+
+	inline static public function inst(song:String):Any
+	{
+		#if MODS_ALLOWED
+		var file:Sound = returnSongFile(modsSongs(song.toLowerCase().replace(' ', '-') + '/Inst'));
+		if(file != null) {
+			return file;
+		}
+		#end
+		return 'songs:assets/songs/${song.toLowerCase().replace(' ', '-')}/Inst.$SOUND_EXT';
+	}
+
+	#if MODS_ALLOWED
+	inline static private function returnSongFile(file:String):Sound
+	{
+		if(FileSystem.exists(file)) {
+			if(!customSoundsLoaded.exists(file)) {
+				customSoundsLoaded.set(file, Sound.fromFile(file));
+			}
+			return customSoundsLoaded.get(file);
+		}
+		return null;
+	}
+	#end
+
+	inline static public function image(key:String, ?library:String):Dynamic
+	{
+		#if MODS_ALLOWED
+		var imageToReturn:FlxGraphic = addCustomGraphic(key);
+		/*
+		//SHADOWMARIO TEST THIS IM NOT AT HOME RN.
+
+		//k so for sum reason even when a current mod is loaded, it will only pull from the graphics key shit : (((
+		//so i made it test if one exists in the mod folder or the mod directories.
+		var pathshit = modsImages(key)
+		if (FileSystem.exists(path)){
+			imageToReturn = BitmapData.fromFile(path);
+		}
+		*/
+		if(imageToReturn != null) return imageToReturn;
+		#end
+		return getPath('images/$key.png', IMAGE, library);
+	}
+	
+	static public function getTextFromFile(key:String, ?ignoreMods:Bool = false):String
+	{
+//		#if sys
+		#if MODS_ALLOWED
+		if (!ignoreMods && FileSystem.exists(mods(key)))
+			return File.getContent(mods(key));
+//		#end
+
+		if (FileSystem.exists(SUtil.getPath() + getPreloadPath(key)))
+			return File.getContent(SUtil.getPath() + getPreloadPath(key));
+
+		if (currentLevel != null)
+		{
+			var levelPath:String = '';
+			if(currentLevel != 'shared') {
+				levelPath = getLibraryPathForce(key, currentLevel);
+				if (FileSystem.exists(SUtil.getPath() + levelPath))
+					return File.getContent(SUtil.getPath() + levelPath);
+			}
+
+			levelPath = getLibraryPathForce(key, 'shared');
+			if (FileSystem.exists(SUtil.getPath() + levelPath))
+				return File.getContent(SUtil.getPath() + levelPath);
+		}
+		#end
+		return Assets.getText(getPath(key, TEXT));
+	}
+
+	inline static public function font(key:String)
+	{
+		#if MODS_ALLOWED
+		var file:String = modsFont(key);
+		if(FileSystem.exists(file)) {
+			return file;
+		}
+		#end
+		return SUtil.getPath() + 'assets/fonts/$key';
+	}
+
+	inline static public function fileExists(key:String, type:AssetType, ?ignoreMods:Bool = false, ?library:String)
+	{		
+		if(OpenFlAssets.exists(Paths.getPath(key, type))) {
+			return true;
+		}
+		return false;
+	}
+
+	inline static public function getSparrowAtlas(key:String, ?library:String)
+	{
+		#if MODS_ALLOWED
+		var imageLoaded:FlxGraphic = addCustomGraphic(key);
+		var xmlExists:Bool = false;
+		if(FileSystem.exists(modsXml(key))) {
+			xmlExists = true;
+		}
+
+		return FlxAtlasFrames.fromSparrow((imageLoaded != null ? imageLoaded : image(key, library)), (xmlExists ? File.getContent(modsXml(key)) : file('images/$key.xml', library)));
 		#else
-		return '';
+		return FlxAtlasFrames.fromSparrow(image(key, library), file('images/$key.xml', library));
 		#end
 	}
 
-	/**
-	 * Uncaught error handler, original made by: sqirra-rng
-	 */
-	public static function uncaughtErrorHandler()
+	inline static public function getPackerAtlas(key:String, ?library:String)
 	{
-		Lib.current.loaderInfo.uncaughtErrorEvents.addEventListener(UncaughtErrorEvent.UNCAUGHT_ERROR, function(u:UncaughtErrorEvent)
-		{
-			var callStack:Array<StackItem> = CallStack.exceptionStack(true);
-			var errMsg:String = '';
+		#if MODS_ALLOWED
+		var imageLoaded:FlxGraphic = addCustomGraphic(key);
+		var txtExists:Bool = false;
+		if(FileSystem.exists(modsTxt(key))) {
+			txtExists = true;
+		}
 
-			for (stackItem in callStack)
-			{
-				switch (stackItem)
-				{
-					case FilePos(s, file, line, column):
-						errMsg += file + ' (line ' + line + ')\n';
-					default:
-						Sys.println(stackItem);
+		return FlxAtlasFrames.fromSpriteSheetPacker((imageLoaded != null ? imageLoaded : image(key, library)), (txtExists ? File.getContent(modsTxt(key)) : file('images/$key.txt', library)));
+		#else
+		return FlxAtlasFrames.fromSpriteSheetPacker(image(key, library), file('images/$key.txt', library));
+		#end
+	}
+
+	inline static public function formatToSongPath(path:String) {
+		return path.toLowerCase().replace(' ', '-');
+	}
+	
+	#if MODS_ALLOWED
+	static public function addCustomGraphic(key:String):FlxGraphic {
+		if(FileSystem.exists(modsImages(key))) {
+			if(!customImagesLoaded.exists(key)) {
+				var newBitmap:BitmapData = BitmapData.fromFile(modsImages(key));
+				var newGraphic:FlxGraphic = FlxGraphic.fromBitmapData(newBitmap, false, key);
+				newGraphic.persist = true;
+				FlxG.bitmap.addGraphic(newGraphic);
+				customImagesLoaded.set(key, true);
+			}
+			return FlxG.bitmap.get(key);
+		}
+		return null;
+	}
+
+	inline static public function mods(key:String = '') {
+		return SUtil.getPath() + 'mods/' + key;
+	}
+	
+	inline static public function modsFont(key:String) {
+		return modFolders('fonts/' + key);
+	}
+
+	inline static public function modsJson(key:String) {
+		return modFolders('data/' + key + '.json');
+	}
+
+	inline static public function modsVideo(key:String) {
+		return modFolders('videos/' + key + '.' + VIDEO_EXT);
+	}
+
+	inline static public function modsMusic(key:String) {
+		return modFolders('music/' + key + '.' + SOUND_EXT);
+	}
+
+	inline static public function modsSounds(key:String) {
+		return modFolders('sounds/' + key + '.' + SOUND_EXT);
+	}
+
+	inline static public function modsSongs(key:String) {
+		return modFolders('songs/' + key + '.' + SOUND_EXT);
+	}
+
+	inline static public function modsImages(key:String) {
+		return modFolders('images/' + key + '.png');
+	}
+
+	inline static public function modsXml(key:String) {
+		return modFolders('images/' + key + '.xml');
+	}
+
+	inline static public function modsTxt(key:String) {
+		return modFolders('images/' + key + '.txt');
+	}
+
+	static public function modFolders(key:String) {
+		if(currentModDirectory != null && currentModDirectory.length > 0) {
+			var fileToCheck:String = mods(currentModDirectory + '/' + key);
+			if(FileSystem.exists(fileToCheck)) {
+				return fileToCheck;
+			}
+		}
+		return SUtil.getPath() + 'mods/' + key;
+	}
+
+	static public function getModDirectories():Array<String> {
+		var list:Array<String> = [];
+		var modsFolder:String = Paths.mods();
+		if(FileSystem.exists(modsFolder)) {
+			for (folder in FileSystem.readDirectory(modsFolder)) {
+				var path = haxe.io.Path.join([modsFolder, folder]);
+				if (sys.FileSystem.isDirectory(path) && !Paths.ignoreModFolders.contains(folder) && !list.contains(folder)) {
+					list.push(folder);
 				}
 			}
-
-			errMsg += u.error;
-
-			Sys.println(errMsg);
-			Application.current.window.alert(errMsg, 'Error!');
-
-			try
-			{
-				if (!FileSystem.exists(SUtil.getPath() + 'crash'))
-					FileSystem.createDirectory(SUtil.getPath() + 'crash');
-
-				File.saveContent(SUtil.getPath() + 'crash/' + Application.current.meta.get('file') + '_'
-					+ FlxStringUtil.formatTime(Date.now().getTime(), true) + '.log',
-					errMsg + "\n");
-			}
-			catch (e:Dynamic)
-				#if android
-				Hardware.toast("Error!\nClouldn't save the crash dump because:\n" + e, 2);
-				#end
-
-			System.exit(1);
-		});
-	}
-
-	#if android
-	public static function saveContent(fileName:String = 'file', fileExtension:String = '.json', fileData:String = 'you forgot to add something in your code')
-	{
-		try
-		{
-			if (!FileSystem.exists(SUtil.getPath() + 'saves'))
-				FileSystem.createDirectory(SUtil.getPath() + 'saves');
-
-			File.saveContent(SUtil.getPath() + 'saves/' + fileName + fileExtension, fileData);
-			Hardware.toast("File Saved Successfully!", 2);
 		}
-		catch (e:Dynamic)
-			Hardware.toast("Error!\nClouldn't save the file because:\n" + e, 2);
-	}
-
-	public static function copyContent(copyPath:String, savePath:String)
-	{
-		try
-		{
-			if (!FileSystem.exists(savePath))
-				File.saveBytes(savePath, OpenFlAssets.getBytes(copyPath));
-		}
-		catch (e:Dynamic)
-			Hardware.toast("Error!\nClouldn't copy the file because:\n" + e, 2);
+		return list;
 	}
 	#end
 }
